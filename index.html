@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Suivi vols — CRL / LGG — Tour de contrôle</title>
+
+  <!-- Leaflet CSS -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="" crossorigin=""/>
+  <!-- FontAwesome for icons -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" integrity="" crossorigin="anonymous" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="tower">✈️</span>
+      <h1>Suivi vols — CRL & LGG</h1>
+    </div>
+    <div class="controls">
+      <label><input id="autoRefresh" type="checkbox" checked /> Rafraîch. auto (60s)</label>
+      <button id="refreshBtn" title="Rafraîchir maintenant"><i class="fa fa-sync"></i></button>
+    </div>
+  </header>
+
+  <main class="container">
+    <section class="leftcol">
+      <div class="airport-card" id="crl-card">
+        <div class="airport-header">
+          <h2>CRL — Charleroi (Brussels South)</h2>
+          <div class="meta">
+            <div id="crl-weather" class="weather-mini">Chargement météo…</div>
+            <div id="crl-runway" class="runway-mini">Calcul piste…</div>
+          </div>
+        </div>
+
+        <div class="compass-row">
+          <div class="compass" data-airport="CRL">
+            <svg viewBox="0 0 100 100" class="compass-svg">
+              <circle cx="50" cy="50" r="46" class="compass-ring"/>
+              <g class="compass-needle">
+                <polygon points="50,8 46,50 50,46 54,50" class="needle-head"/>
+                <rect x="48" y="46" width="4" height="40" class="needle-body"/>
+              </g>
+              <text x="50" y="96" text-anchor="middle" class="compass-label">Vent</text>
+            </svg>
+            <div class="wind-info" id="crl-wind-info">--</div>
+          </div>
+
+          <div class="flight-toggle">
+            <label><input type="radio" name="crl-mode" value="arrivals" checked /> Arrivées</label>
+            <label><input type="radio" name="crl-mode" value="departures" /> Départs</label>
+          </div>
+        </div>
+
+        <div class="flight-table-wrap">
+          <table class="flight-table" id="crl-table">
+            <thead>
+              <tr><th>Heure</th><th>Vol</th><th>Origine/Destination</th><th>Statut</th><th>Compagnie</th></tr>
+            </thead>
+            <tbody>
+              <tr><td colspan="5">Chargement des vols…</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="airport-card" id="lgg-card">
+        <div class="airport-header">
+          <h2>LGG — Liège</h2>
+          <div class="meta">
+            <div id="lgg-weather" class="weather-mini">Chargement météo…</div>
+            <div id="lgg-runway" class="runway-mini">Calcul piste…</div>
+          </div>
+        </div>
+
+        <div class="compass-row">
+          <div class="compass" data-airport="LGG">
+            <svg viewBox="0 0 100 100" class="compass-svg">
+              <circle cx="50" cy="50" r="46" class="compass-ring"/>
+              <g class="compass-needle">
+                <polygon points="50,8 46,50 50,46 54,50" class="needle-head"/>
+                <rect x="48" y="46" width="4" height="40" class="needle-body"/>
+              </g>
+              <text x="50" y="96" text-anchor="middle" class="compass-label">Vent</text>
+            </svg>
+            <div class="wind-info" id="lgg-wind-info">--</div>
+          </div>
+
+          <div class="flight-toggle">
+            <label><input type="radio" name="lgg-mode" value="arrivals" checked /> Arrivées</label>
+            <label><input type="radio" name="lgg-mode" value="departures" /> Départs</label>
+          </div>
+        </div>
+
+        <div class="flight-table-wrap">
+          <table class="flight-table" id="lgg-table">
+            <thead>
+              <tr><th>Heure</th><th>Vol</th><th>Origine/Destination</th><th>Statut</th><th>Compagnie</th></tr>
+            </thead>
+            <tbody>
+              <tr><td colspan="5">Chargement des vols…</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <aside class="rightcol">
+      <div class="map-card">
+        <h3>Carte des sonomètres</h3>
+        <div id="map" style="height:520px;"></div>
+        <div class="map-legend">
+          <span class="legend-dot sonometer"></span> Sonomètre
+        </div>
+      </div>
+
+      <div class="info-card">
+        <h3>Notes</h3>
+        <ul>
+          <li>Remplacez les variables API dans <code>app.js</code> (OPENWEATHER_API_KEY, FLIGHT_DATA) pour connecter des APIs réelles.</li>
+          <li>Algorithme de piste active : basé sur la direction du vent et les cap(s) de piste (ex: CRL 06/24, LGG 05/23).</li>
+          <li>Mode développement : si pas de clé, un mock local est utilisé.</li>
+        </ul>
+      </div>
+    </aside>
+  </main>
+
+  <footer class="footer">
+    <small>© Suivi vols — CRL &amp; LGG — Prototype</small>
+  </footer>
+
+  <!-- Libraries -->
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="" crossorigin=""></script>
+  <script src="app.js"></script>
+</body>
+</html>

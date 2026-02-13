@@ -6,7 +6,7 @@
 const CONFIG = {
   OPENWEATHER_API_KEY: '8a41cb0d85efd423c82acc9eb5f7d62d', // <-- mettre votre clé ici
   // Exemple: fetch flights from a custom endpoint that returns {arrivals:[], departures:[]}
-  FLIGHT_API_ENDPOINT: '035d39b3-ef7f-43de-b226-8e249b319516', // <-- mettre votre endpoint (optionnel)
+  FLIGHT_API_ENDPOINT: 'f906d7a42011f1752112a2e10a1d827e', // <-- mettre votre endpoint (optionnel)
   AUTO_REFRESH_SEC: 60
 };
 

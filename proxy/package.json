@@ -1,19 +1,21 @@
 {
-  "name": "belgium-flight-dashboard-proxy",
+  "name": "belgium-flight-proxy",
   "version": "1.0.0",
   "private": true,
   "type": "module",
+  "engines": {
+    "node": ">=18 <=22"
+  },
   "scripts": {
     "start": "node server.js",
     "dev": "node server.js"
   },
-  {
   "dependencies": {
+    "@microsoft/signalr": "^8.0.1",
     "cheerio": "^1.0.0-rc.12",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
     "express": "^4.18.2",
-    "node-fetch": "^3.3.2",
-    "@microsoft/signalr": "^8.0.1"
+    "node-fetch": "^3.3.2"
   }
 }

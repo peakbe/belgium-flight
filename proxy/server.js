@@ -161,6 +161,11 @@ app.get('/api/lgg/arrivals', async (_req, res) => {
 // Healthcheck pratique sur Render
 app.get('/healthz', (_req, res) => res.status(200).send('ok'));
 
+// Eviter le 404
+app.get('/', (_req, res) => {
+  res.type('text/plain').send('Belgium Flight Proxy — OK. Try /healthz or /api/... endpoints.');
+});
+
 /* --------- Start --------- */
 
 app.listen(PORT, () => console.log(`Flight proxy listening on :${PORT}`));

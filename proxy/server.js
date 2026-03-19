@@ -29,52 +29,56 @@ function row(time, flight, city, statusText) {
 
 /** CRL (site officiel) + fallback si la page change trop */
 async function fetchCRL(type = 'departures') {
-  const now = new Date();
-  const pad = (n) => String(n).padStart(2, '0');
-  const datePath = `${pad(now.getDate())}-${pad(now.getMonth() + 1)}-${now.getFullYear()}`;
-
-  // Site officiel CRL (panneau live par date) — la structure peut évoluer
-  // Source: Brussels South Charleroi (live flights) 
-  const primary = `https://www.brussels-charleroi-airport.com/en/flights/live/${type}/${datePath}`;
-  // Fallback public si le DOM change (agrégateur)
-  const fallback = type === 'departures'
+  // 1) Source primaire : Airportia (rend quasi toujours un tableau HTML côté serveur)
+  const airportia = type === 'departures'
     ? 'https://www.airportia.com/belgium/brussels-south-charleroi-airport/departures/'
     : 'https://www.airportia.com/belgium/brussels-south-charleroi-airport/arrivals/';
 
-  let html = '';
+  // 2) Fallback : site officiel CRL (DOM parfois différent / dynamique)
+  const now = new Date();
+  const pad = (n) => String(n).padStart(2, '0');
+  const datePath = `${pad(now.getDate())}-${pad(now.getMonth() + 1)}-${now.getFullYear()}`;
+  const crlOff = `https://www.brussels-charleroi-airport.com/en/flights/live/${type}/${datePath}`;
+
+  const UA = { 'user-agent': 'FlightDashboard/1.0', 'accept-language': 'fr,en;q=0.9' };
+  let html = '', rows = [];
+
+  // --- Airportia d’abord
   try {
-    const r = await fetch(primary, { headers: { 'user-agent': 'FlightDashboard/1.0' } });
+    const r = await fetch(airportia, { headers: UA });
     html = await r.text();
   } catch {}
 
-  let rows = [];
   if (html && html.length > 1000) {
     const $ = load(html);
-    $('table tbody tr').each((i, el) => {
+
+    // Sélecteurs un peu plus tolérants (.table ou table)
+    $('table tbody tr, .table tbody tr').each((i, el) => {
       const td = $(el).find('td');
-      const time = td.eq(0).text().trim();
-      const flight = td.eq(1).text().trim();
-      const city = td.eq(2).text().trim();
-      const status = td.eq(3).text().trim();
+      const time   = td.eq(0).text().trim();     // Heure
+      const flight = td.eq(1).text().trim();     // Vol
+      const city   = td.eq(2).text().trim();     // Ville
+      const status = td.eq(3).text().trim();     // Statut (si présent)
       if (time && flight && city) rows.push(row(time, flight, city, status));
     });
   }
 
   if (rows.length) return rows;
 
-  // Fallback (structure différente possible)
+  // --- Fallback : CRL site officiel
+  html = '';
   try {
-    const r = await fetch(fallback, { headers: { 'user-agent': 'FlightDashboard/1.0' } });
+    const r = await fetch(crlOff, { headers: UA });
     html = await r.text();
   } catch {}
 
   if (html && html.length > 1000) {
     const $ = load(html);
-    $('table tbody tr, .table tbody tr').each((i, el) => {
+    $('table tbody tr').each((i, el) => {
       const td = $(el).find('td');
-      const time = td.eq(0).text().trim();
+      const time   = td.eq(0).text().trim();
       const flight = td.eq(1).text().trim();
-      const city = td.eq(2).text().trim();
+      const city   = td.eq(2).text().trim();
       const status = td.eq(3).text().trim();
       if (time && flight && city) rows.push(row(time, flight, city, status));
     });
@@ -82,6 +86,7 @@ async function fetchCRL(type = 'departures') {
 
   return rows;
 }
+
 
 /** LGG (site officiel) + fallback si nécessaire */
 async function fetchLGG(type = 'departures') {

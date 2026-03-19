@@ -29,64 +29,38 @@ function row(time, flight, city, statusText) {
 
 /** CRL (site officiel) + fallback si la page change trop */
 async function fetchCRL(type = 'departures') {
-  // 1) Source primaire : Airportia (rend quasi toujours un tableau HTML côté serveur)
-  const airportia = type === 'departures'
-    ? 'https://www.airportia.com/belgium/brussels-south-charleroi-airport/departures/'
-    : 'https://www.airportia.com/belgium/brussels-south-charleroi-airport/arrivals/';
 
-  // 2) Fallback : site officiel CRL (DOM parfois différent / dynamique)
-  const now = new Date();
-  const pad = (n) => String(n).padStart(2, '0');
-  const datePath = `${pad(now.getDate())}-${pad(now.getMonth() + 1)}-${now.getFullYear()}`;
-  const crlOff = `https://www.brussels-charleroi-airport.com/en/flights/live/${type}/${datePath}`;
+  const flightera = type === 'departures'
+    ? 'https://www.flightera.net/en/airport/Brussels+South+Charleroi+Airport/EBCI/departures'
+    : 'https://www.flightera.net/en/airport/Brussels+South+Charleroi+Airport/EBCI/arrivals';
 
-  const UA = { 'user-agent': 'FlightDashboard/1.0', 'accept-language': 'fr,en;q=0.9' };
-  let html = '', rows = [];
-
-  // --- Airportia d’abord
+  let html = '';
   try {
-    const r = await fetch(airportia, { headers: UA });
+    const r = await fetch(flightera, { headers: { 'user-agent': 'Mozilla/5.0' }});
     html = await r.text();
-  } catch {}
-
-  if (html && html.length > 1000) {
-    const $ = load(html);
-
-    // Sélecteurs un peu plus tolérants (.table ou table)
-    $('table tbody tr, .table tbody tr').each((i, el) => {
-      const td = $(el).find('td');
-      const time   = td.eq(0).text().trim();     // Heure
-      const flight = td.eq(1).text().trim();     // Vol
-      const city   = td.eq(2).text().trim();     // Ville
-      const status = td.eq(3).text().trim();     // Statut (si présent)
-      if (time && flight && city) rows.push(row(time, flight, city, status));
-    });
+  } catch {
+    return [];
   }
 
-  if (rows.length) return rows;
+  if (!html || html.length < 500) return [];
 
-  // --- Fallback : CRL site officiel
-  html = '';
-  try {
-    const r = await fetch(crlOff, { headers: UA });
-    html = await r.text();
-  } catch {}
+  const $ = load(html);
+  const rows = [];
 
-  if (html && html.length > 1000) {
-    const $ = load(html);
-    $('table tbody tr').each((i, el) => {
-      const td = $(el).find('td');
-      const time   = td.eq(0).text().trim();
-      const flight = td.eq(1).text().trim();
-      const city   = td.eq(2).text().trim();
-      const status = td.eq(3).text().trim();
-      if (time && flight && city) rows.push(row(time, flight, city, status));
-    });
-  }
+  $('table tbody tr').each((i, el) => {
+    const td = $(el).find('td');
+    const time   = td.eq(0).text().trim();
+    const flight = td.eq(1).text().trim();
+    const city   = td.eq(2).text().trim();
+    const status = td.eq(3).text().trim();
+
+    if (time && flight && city) {
+      rows.push(row(time, flight, city, status));
+    }
+  });
 
   return rows;
 }
-
 
 /** LGG (site officiel) + fallback si nécessaire */
 async function fetchLGG(type = 'departures') {

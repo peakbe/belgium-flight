@@ -64,52 +64,35 @@ async function fetchCRL(type = 'departures') {
 
 /** LGG (site officiel) + fallback si nécessaire */
 async function fetchLGG(type = 'departures') {
-  // Page officielle Départs & Arrivées
-  // Source: Liège Airport (page Passager)
-  const primary = 'https://www.liegeairport.com/passenger/fr/departs-arrivees/';
-  const fallback = type === 'departures'
-    ? 'https://www.flightera.net/en/airport/Liege/EBLG'
-    : 'https://www.airportia.com/belgium/liege-airport/arrivals/';
+
+  const flightera = type === 'departures'
+    ? 'https://www.flightera.net/en/airport/Liege/EBLG/departures'
+    : 'https://www.flightera.net/en/airport/Liege/EBLG/arrivals';
 
   let html = '';
   try {
-    const r = await fetch(primary, { headers: { 'user-agent': 'FlightDashboard/1.0' } });
+    const r = await fetch(flightera, { headers: { 'user-agent': 'Mozilla/5.0' }});
     html = await r.text();
-  } catch {}
-
-  let rows = [];
-  if (html && html.length > 1000) {
-    const $ = load(html);
-    // On racle toutes les lignes de tableaux présents sur la page
-    $('table tbody tr').each((i, el) => {
-      const td = $(el).find('td');
-      const time = td.eq(0).text().trim();
-      const flight = td.eq(1).text().trim();
-      const city = td.eq(2).text().trim();
-      const status = td.eq(3).text().trim();
-      if (time && flight && city) rows.push(row(time, flight, city, status));
-    });
+  } catch {
+    return [];
   }
 
-  if (rows.length) return rows;
+  if (!html || html.length < 500) return [];
 
-  // Fallback public
-  try {
-    const r = await fetch(fallback, { headers: { 'user-agent': 'FlightDashboard/1.0' } });
-    html = await r.text();
-  } catch {}
+  const $ = load(html);
+  const rows = [];
 
-  if (html && html.length > 1000) {
-    const $ = load(html);
-    $('table tbody tr, .table tbody tr').each((i, el) => {
-      const td = $(el).find('td');
-      const time = td.eq(0).text().trim();
-      const flight = td.eq(1).text().trim();
-      const city = td.eq(2).text().trim();
-      const status = td.eq(3).text().trim();
-      if (time && flight && city) rows.push(row(time, flight, city, status));
-    });
-  }
+  $('table tbody tr').each((i, el) => {
+    const td = $(el).find('td');
+    const time   = td.eq(0).text().trim();
+    const flight = td.eq(1).text().trim();
+    const city   = td.eq(2).text().trim();
+    const status = td.eq(3).text().trim();
+
+    if (time && flight && city) {
+      rows.push(row(time, flight, city, status));
+    }
+  });
 
   return rows;
 }

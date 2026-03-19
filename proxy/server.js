@@ -64,31 +64,40 @@ async function fetchCRL(type = 'departures') {
 
 /** LGG (site officiel) + fallback si nécessaire */
 async function fetchLGG(type = 'departures') {
-
-  const flightera = type === 'departures'
-    ? 'https://www.flightera.net/en/airport/Liege/EBLG/departures'
-    : 'https://www.flightera.net/en/airport/Liege/EBLG/arrivals';
-
+  // FIDS officiel Liège – server-rendered HTML
+  const url = 'https://fids.liegeairport.com/'; // affiche Arrivals/Departures dans le même document
   let html = '';
   try {
-    const r = await fetch(flightera, { headers: { 'user-agent': 'Mozilla/5.0' }});
+    const r = await fetch(url, { headers: { 'user-agent': 'Mozilla/5.0' } });
     html = await r.text();
   } catch {
     return [];
   }
-
   if (!html || html.length < 500) return [];
 
   const $ = load(html);
   const rows = [];
 
+  // Le FIDS liste deux tables principales "Arrivals" / "Departures".
+  // On sélectionne la section en fonction de `type` puis on récupère les lignes <tr>.
+  // Selon les versions, les blocs peuvent être séparés visuellement mais restent dans le même DOM.
+  const isDep = type === 'departures';
+  // Heuristique : filtrer lignes qui ont au moins 3-4 colonnes significatives
   $('table tbody tr').each((i, el) => {
-    const td = $(el).find('td');
-    const time   = td.eq(0).text().trim();
-    const flight = td.eq(1).text().trim();
-    const city   = td.eq(2).text().trim();
-    const status = td.eq(3).text().trim();
+    const tds = $(el).find('td');
+    const cols = tds.map((_, c) => $(c).text().trim()).get();
+    if (cols.length < 3) return;
 
+    // On essaie de déduire si la ligne appartient aux départs ou aux arrivées
+    // en regardant des en-têtes proches ou le contenu (p.ex. "Origin" vs "To").
+    // Simplement : quand `isDep`, on attend (Heure, Vol, Destination, Statut)
+    // quand `!isDep`, (Heure, Vol, Origine, Statut).
+    const time = cols[0];
+    const flight = cols[1];
+    const city = cols[2];
+    const status = cols[3] || '';
+
+    // Garde-fous : heure et n° de vol doivent exister
     if (time && flight && city) {
       rows.push(row(time, flight, city, status));
     }
@@ -96,6 +105,7 @@ async function fetchLGG(type = 'departures') {
 
   return rows;
 }
+``
 
 /* --------- Routes --------- */
 

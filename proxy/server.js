@@ -1,6 +1,6 @@
 import express from 'express';
 import fetch from 'node-fetch';
-import cheerio from 'cheerio';
+import { load } from 'cheerio'; // ✅
 import cors from 'cors';
 import dotenv from 'dotenv';
 import { HubConnectionBuilder, LogLevel } from '@microsoft/signalr';
@@ -89,7 +89,7 @@ async function scrapeCRL(type) {
   try {
     const r = await fetch(url, { headers: { "user-agent": "Mozilla/5.0" } });
     const html = await r.text();
-    const $ = cheerio.load(html);
+    const $ = load(html);
 
     const rows = [];
 

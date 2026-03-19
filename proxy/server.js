@@ -1,6 +1,5 @@
 import express from 'express';
 import fetch from 'node-fetch';
-import { load } from 'cheerio';
 import cors from 'cors';
 import dotenv from 'dotenv';
 
@@ -9,226 +8,164 @@ const app = express();
 app.use(cors());
 
 const PORT = process.env.PORT || 8787;
+const AIRLABS_KEY = process.env.AIRLABS_API_KEY || "";
 
-/* ------------------------------------------------------------------
+/* ----------------------------------------------------------
    Helpers
------------------------------------------------------------------- */
+---------------------------------------------------------- */
 
 function normalizeStatus(text) {
   const t = (text || '').toLowerCase();
-  if (t.includes('boarding') || t.includes('embarquement'))
-    return { status: 'Embarquement', statusClass: 'boarding' };
-  if (t.includes('delayed') || t.includes('retard'))
-    return { status: 'Retardé', statusClass: 'delayed' };
-  if (t.includes('on time') || t.includes("à l'heure"))
-    return { status: "À l'heure", statusClass: 'ontime' };
+  if (t.includes('landed')) return { status: 'Atterri', statusClass: 'ontime' };
+  if (t.includes('departed')) return { status: 'Parti', statusClass: 'boarding' };
+  if (t.includes('cancel')) return { status: 'Annulé', statusClass: 'delayed' };
+  if (t.includes('delay')) return { status: 'Retardé', statusClass: 'delayed' };
+  if (t.includes('scheduled')) return { status: 'Prévu', statusClass: '' };
+  if (t.includes('en-route')) return { status: 'En vol', statusClass: 'ontime' };
   return { status: text || '—', statusClass: '' };
 }
 
-function row(time, flight, city, statusText) {
-  const st = normalizeStatus(statusText);
+function toRow(obj, mode) {
+  // mode = "dep" ou "arr"
+  const time = obj.dep_time || obj.arr_time || "—";
+  const flight = obj.flight_iata || obj.flight_icao || obj.flight_number || "—";
+  const city = (mode === 'dep')
+    ? (obj.arr_city || obj.arr_iata || obj.arr_icao || "—")
+    : (obj.dep_city || obj.dep_iata || obj.dep_icao || "—");
+
+  const rawStatus = obj.status || obj.cs ?? "";
+  const st = normalizeStatus(rawStatus);
+
   return {
-    time, flight, city,
+    time,
+    flight,
+    city,
     status: st.status,
     statusClass: st.statusClass
   };
 }
 
-/* ------------------------------------------------------------------
-   LGG (Liège) — FIDS officiel
-   Source : FIDS Liège affiche les tableaux en HTML côté serveur
-   Réf : https://fids.liegeairport.com/  ([1](https://fids.liegeairport.com/))
-         https://fids.liegeairport.com/externals ([2](https://fids.liegeairport.com/externals))
------------------------------------------------------------------- */
+/* ----------------------------------------------------------
+   Fetch depuis AirLabs
+   Réf API: https://airlabs.co/api/v9/schedules  (horaires) [1](https://airlabs.co/brussels-south-charleroi-airport-api)
+            https://airlabs.co/api/v9/flights    (statuts live)
+---------------------------------------------------------- */
 
-async function fetchLGG(type = 'departures') {
-  const UA = {
-    'user-agent': 'Mozilla/5.0 (BelgiumFlightDashboard)',
-    'accept-language': 'fr,en;q=0.9'
-  };
+async function fetchSchedules(params) {
+  if (!AIRLABS_KEY) return [];
+  const qs = new URLSearchParams({ api_key: AIRLABS_KEY, ...params });
+  const url = `https://airlabs.co/api/v9/schedules?${qs.toString()}`;
 
-  // Plusieurs endpoints FIDS, on essaie chacun
-  const candidates = [
-    'https://fids.liegeairport.com/externals',
-    'https://fids.liegeairport.com/spw',
-    'https://fids.liegeairport.com/'
-  ];
-
-  for (const url of candidates) {
-    try {
-      const r = await fetch(url, { headers: UA });
-      const html = await r.text();
-      if (!html || html.length < 500) continue;
-
-      const $ = load(html);
-      const rows = [];
-
-      // On récupère tous les <table><tr>, puis on filtre
-      $('table tbody tr').each((i, el) => {
-        const tds = $(el).find('td');
-        const cols = tds.map((_, c) => $(c).text().trim()).get();
-        if (cols.length < 3) return;
-
-        const time   = cols[0];
-        const flight = cols[1];
-        const city   = cols[2];
-        const status = cols[3] || cols[4] || '';
-
-        const okTime   = /^\d{1,2}:\d{2}/.test(time);
-        const okFlight = /[A-Z]{1,3}\d+/.test(flight);
-
-        if (okTime && okFlight && city) rows.push(row(time, flight, city, status));
-      });
-
-      if (rows.length) return rows;
-
-    } catch (e) {
-      // On continue sur l'URL suivante
-    }
+  try {
+    const r = await fetch(url);
+    const j = await r.json();
+    if (!j.response || !Array.isArray(j.response)) return [];
+    return j.response;
+  } catch {
+    return [];
   }
-
-  return [];
 }
 
-/* ------------------------------------------------------------------
-   CRL (Charleroi) — FlightStats en primaire, Airportia en fallback
-   FlightStats SSR : https://www.flightstats.com/v2/... ([3](https://www.airportia.com/belgium/brussels-south-charleroi-airport/departures/))
-   Airportia SSR : https://www.airportia.com/...        ([3](https://www.airportia.com/belgium/brussels-south-charleroi-airport/departures/))
------------------------------------------------------------------- */
+async function fetchFlights(params) {
+  if (!AIRLABS_KEY) return [];
+  const qs = new URLSearchParams({ api_key: AIRLABS_KEY, ...params });
+  const url = `https://airlabs.co/api/v9/flights?${qs.toString()}`;
 
-async function fetchCRL(type = 'departures') {
-  const UA = {
-    'user-agent': 'Mozilla/5.0 (BelgiumFlightDashboard)',
-    'accept-language': 'en,fr;q=0.8'
-  };
-
-  const flightstats = type === 'departures'
-    ? 'https://www.flightstats.com/v2/flight-tracker/departures/CRL/'
-    : 'https://www.flightstats.com/v2/flight-tracker/arrivals/CRL/';
-
-  const airportia = type === 'departures'
-    ? 'https://www.airportia.com/belgium/brussels-south-charleroi-airport/departures/'
-    : 'https://www.airportia.com/belgium/brussels-south-charleroi-airport/arrivals/';
-
-  /* ---- 1) FlightStats -> SSR ---- */
   try {
-    const r = await fetch(flightstats, { headers: UA });
-    const html = await r.text();
-    if (html && html.length > 500) {
-      const $ = load(html);
-      const rows = [];
-
-      $('table tbody tr, .table tbody tr').each((i, el) => {
-        const tds = $(el).find('td');
-        const cols = tds.map((_, c) => $(c).text().trim()).get();
-
-        if (cols.length < 3) return;
-
-        const time   = cols[0];
-        const flight = cols[1];
-        const city   = cols[2];
-        const status = cols[3] || cols[4] || '';
-
-        const okTime   = /^\d{1,2}:\d{2}/.test(time);
-        const okFlight = /[A-Z]{1,3}\d+/.test(flight);
-
-        if (okTime && okFlight && city)
-          rows.push(row(time, flight, city, status));
-      });
-
-      if (rows.length) return rows;
-    }
-  } catch (e) {}
-
-  /* ---- 2) Airportia -> SSR souvent ---- */
-  try {
-    const r2 = await fetch(airportia, { headers: UA });
-    const html2 = await r2.text();
-    if (html2 && html2.length > 500) {
-      const $ = load(html2);
-      const rows = [];
-
-      $('table tbody tr, .table tbody tr').each((i, el) => {
-        const tds = $(el).find('td');
-        const time   = tds.eq(0).text().trim();
-        const flight = tds.eq(1).text().trim();
-        const city   = tds.eq(2).text().trim();
-        const status = tds.eq(3).text().trim();
-
-        const okTime   = /^\d{1,2}:\d{2}/.test(time);
-        const okFlight = /[A-Z]{1,3}\d+/.test(flight);
-
-        if (okTime && okFlight && city)
-          rows.push(row(time, flight, city, status));
-      });
-
-      if (rows.length) return rows;
-    }
-  } catch (e) {}
-
-  return [];
+    const r = await fetch(url);
+    const j = await r.json();
+    if (!j.response || !Array.isArray(j.response)) return [];
+    return j.response;
+  } catch {
+    return [];
+  }
 }
 
-/* ------------------------------------------------------------------
+/* ----------------------------------------------------------
+   CRL (passagers) -> SCHEDULES est suffisant
+---------------------------------------------------------- */
+
+async function getCRLDepartures() {
+  const rows = await fetchSchedules({ dep_iata: "CRL" });
+  return rows.map(x => toRow(x, "dep"));
+}
+
+async function getCRLArrivals() {
+  const rows = await fetchSchedules({ arr_iata: "CRL" });
+  return rows.map(x => toRow(x, "arr"));
+}
+
+/* ----------------------------------------------------------
+   LGG (cargo) -> COMBO SCHEDULES + FLIGHTS pour couvrir tout
+---------------------------------------------------------- */
+
+async function getLGGDepartures() {
+  const sched = await fetchSchedules({ dep_iata: "LGG" });
+  const live  = await fetchFlights({ dep_iata: "LGG" });
+
+  const combined = [...sched, ...live];
+
+  const rows = combined.map(x => toRow(x, "dep"));
+
+  // dédoublonner par num de vol + heure
+  const dedupe = new Map();
+  rows.forEach(r => {
+    const key = r.flight + "__" + r.time;
+    dedupe.set(key, r);
+  });
+  return [...dedupe.values()];
+}
+
+async function getLGGArrivals() {
+  const sched = await fetchSchedules({ arr_iata: "LGG" });
+  const live  = await fetchFlights({ arr_iata: "LGG" });
+
+  const combined = [...sched, ...live];
+
+  const rows = combined.map(x => toRow(x, "arr"));
+
+  const dedupe = new Map();
+  rows.forEach(r => {
+    const key = r.flight + "__" + r.time;
+    dedupe.set(key, r);
+  });
+  return [...dedupe.values()];
+}
+
+/* ----------------------------------------------------------
    API routes
------------------------------------------------------------------- */
+---------------------------------------------------------- */
 
-app.get('/api/crl/departures', async (_req, res) => {
-  try { res.json(await fetchCRL('departures')); }
-  catch { res.json([]); }
+app.get("/api/crl/departures", async (_req, res) => {
+  res.json(await getCRLDepartures());
 });
 
-app.get('/api/crl/arrivals', async (_req, res) => {
-  try { res.json(await fetchCRL('arrivals')); }
-  catch { res.json([]); }
+app.get("/api/crl/arrivals", async (_req, res) => {
+  res.json(await getCRLArrivals());
 });
 
-app.get('/api/lgg/departures', async (_req, res) => {
-  try { res.json(await fetchLGG('departures')); }
-  catch { res.json([]); }
+app.get("/api/lgg/departures", async (_req, res) => {
+  res.json(await getLGGDepartures());
 });
 
-app.get('/api/lgg/arrivals', async (_req, res) => {
-  try { res.json(await fetchLGG('arrivals')); }
-  catch { res.json([]); }
+app.get("/api/lgg/arrivals", async (_req, res) => {
+  res.json(await getLGGArrivals());
 });
 
-/* ------------------------------------------------------------------
-   Debug route: permet de voir ce que Render reçoit réellement
------------------------------------------------------------------- */
+/* ----------------------------------------------------------
+   Health
+---------------------------------------------------------- */
 
-app.get('/debug/source', async (req, res) => {
-  try {
-    const url = req.query.url;
-    if (!url) return res.status(400).send("missing ?url=");
+app.get("/healthz", (_req, res) => res.status(200).send("ok"));
 
-    const r = await fetch(url, {
-      headers: {
-        'user-agent': 'Mozilla/5.0 (BelgiumFlightDashboard)',
-        'accept-language': 'en,fr;q=0.8'
-      }
-    });
-    const html = await r.text();
-    res.type('text/plain').send(html.slice(0, 4000));
-  } catch (e) {
-    res.status(500).send(String(e));
-  }
+app.get("/", (_req, res) => {
+  res.type("text/plain").send("Belgium Flight Proxy — OK. Try /api/crl/departures etc.");
 });
 
-/* ------------------------------------------------------------------
-   Root + Health
------------------------------------------------------------------- */
-
-app.get('/', (_req, res) => {
-  res.type('text/plain').send('Belgium Flight Proxy — OK. Try /healthz or /api/... ');
-});
-
-app.get('/healthz', (_req, res) => res.status(200).send('ok'));
-
-/* ------------------------------------------------------------------
+/* ----------------------------------------------------------
    Start
------------------------------------------------------------------- */
+---------------------------------------------------------- */
 
 app.listen(PORT, () => {
-  console.log(`Flight proxy listening on :${PORT}`);
+  console.log(`Flight proxy listening on port: ${PORT}`);
 });

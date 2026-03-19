@@ -19,10 +19,10 @@ function normalizeStatus(text) {
 
   if (t.includes('landed'))     return { status: 'Atterri',    statusClass: 'ontime' };
   if (t.includes('departed'))   return { status: 'Parti',      statusClass: 'boarding' };
-  if (t.includes('cancel'))     return { status: 'Annulé',     statusClass: 'delayed'  };
-  if (t.includes('delay'))      return { status: 'Retardé',    statusClass: 'delayed'  };
-  if (t.includes('scheduled'))  return { status: 'Prévu',      statusClass: ''         };
-  if (t.includes('en-route'))   return { status: 'En vol',     statusClass: 'ontime'   };
+  if (t.includes('cancel'))     return { status: 'Annulé',     statusClass: 'delayed' };
+  if (t.includes('delay'))      return { status: 'Retardé',    statusClass: 'delayed' };
+  if (t.includes('scheduled'))  return { status: 'Prévu',      statusClass: '' };
+  if (t.includes('en-route'))   return { status: 'En vol',     statusClass: 'ontime' };
 
   return { status: text || '—', statusClass: '' };
 }
@@ -51,8 +51,8 @@ function toRow(obj, mode) {
 }
 
 /* ============================================================
-   AirLabs fetchers
-   Réf : https://airlabs.co/api (Schedules / Flights) [1](https://airlabs.co/brussels-south-charleroi-airport-api)
+   AirLabs Fetch
+   Réf : https://airlabs.co/api (timetable + flights) [1](https://airlabs.co/brussels-south-charleroi-airport-api)
 ============================================================ */
 
 async function fetchAirLabs(endpoint, params) {
@@ -73,50 +73,76 @@ async function fetchAirLabs(endpoint, params) {
 }
 
 /* ============================================================
-   CRL — SCHEDULES only (passagers)
+   CRL — timetable (passagers)
 ============================================================ */
 
 async function getCRLDepartures() {
-  const data = await fetchAirLabs("schedules", { dep_iata: "CRL" });
+  const data = await fetchAirLabs("timetable", {
+    dep_iata: "CRL",
+    type: "departure",
+    _view: "basic"
+  });
   return data.map(x => toRow(x, "dep"));
 }
 
 async function getCRLArrivals() {
-  const data = await fetchAirLabs("schedules", { arr_iata: "CRL" });
+  const data = await fetchAirLabs("timetable", {
+    arr_iata: "CRL",
+    type: "arrival",
+    _view: "basic"
+  });
   return data.map(x => toRow(x, "arr"));
 }
 
 /* ============================================================
-   LGG — cargo → SCHEDULES + FLIGHTS
+   LGG — cargo => timetable + flights
 ============================================================ */
 
 async function getLGGDepartures() {
-  const sched = await fetchAirLabs("schedules", { dep_iata: "LGG" });
-  const live  = await fetchAirLabs("flights",   { dep_iata: "LGG" });
+  const sched = await fetchAirLabs("timetable", {
+    dep_iata: "LGG",
+    type: "departure",
+    _view: "basic"
+  });
+
+  const live = await fetchAirLabs("flights", {
+    dep_icao: "EBLG",
+    _view: "basic"
+  });
 
   const combined = [...sched, ...live];
   const mapped = combined.map(x => toRow(x, "dep"));
 
   const dedupe = new Map();
   mapped.forEach(r => {
-    const k = r.flight + "_" + r.time;
-    dedupe.set(k, r);
+    const key = r.flight + "_" + r.time;
+    dedupe.set(key, r);
   });
+
   return [...dedupe.values()];
 }
 
 async function getLGGArrivals() {
-  const sched = await fetchAirLabs("schedules", { arr_iata: "LGG" });
-  const live  = await fetchAirLabs("flights",   { arr_iata: "LGG" });
+  const sched = await fetchAirLabs("timetable", {
+    arr_iata: "LGG",
+    type: "arrival",
+    _view: "basic"
+  });
+
+  const live = await fetchAirLabs("flights", {
+    arr_icao: "EBLG",
+    _view: "basic"
+  });
 
   const combined = [...sched, ...live];
   const mapped = combined.map(x => toRow(x, "arr"));
 
   const dedupe = new Map();
   mapped.forEach(r => {
-    const k = r.flight + "_" + r.time;
-    dedupe.set(k, r);
+    const key = r.flight + "_" + r.time;
+    dedupe.set(key, r);
   });
+
   return [...dedupe.values()];
 }
 
@@ -145,7 +171,6 @@ app.get("/api/lgg/arrivals", async (_req, res) => {
 ============================================================ */
 
 app.get("/healthz", (_req, res) => res.status(200).send("ok"));
-
 app.get("/", (_req, res) => {
   res.type("text/plain").send("Belgium Flight Proxy — OK. Try /healthz or /api/... ");
 });
@@ -157,3 +182,4 @@ app.get("/", (_req, res) => {
 app.listen(PORT, () => {
   console.log("Flight proxy listening on port " + PORT);
 });
+``

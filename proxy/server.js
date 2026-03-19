@@ -29,38 +29,68 @@ function row(time, flight, city, statusText) {
 
 /** CRL (site officiel) + fallback si la page change trop */
 async function fetchCRL(type = 'departures') {
+  // Source primaire : FlightStats (server-rendered)
+  const flightstats = type === 'departures'
+    ? 'https://www.flightstats.com/v2/flight-tracker/departures/CRL/'
+    : 'https://www.flightstats.com/v2/flight-tracker/arrivals/CRL/';
 
-  const flightera = type === 'departures'
-    ? 'https://www.flightera.net/en/airport/Brussels+South+Charleroi+Airport/EBCI/departures'
-    : 'https://www.flightera.net/en/airport/Brussels+South+Charleroi+Airport/EBCI/arrivals';
+  // Fallback : Airportia (souvent SSR, mais selon l’heure certaines sections peuvent être vides)
+  const airportia = type === 'departures'
+    ? 'https://www.airportia.com/belgium/brussels-south-charleroi-airport/departures/'
+    : 'https://www.airportia.com/belgium/brussels-south-charleroi-airport/arrivals/';
 
+  const UA = { 'user-agent': 'Mozilla/5.0', 'accept-language': 'en;q=0.9,fr;q=0.8' };
+
+  // --- Source primaire
   let html = '';
   try {
-    const r = await fetch(flightera, { headers: { 'user-agent': 'Mozilla/5.0' }});
+    const r = await fetch(flightstats, { headers: UA });
     html = await r.text();
-  } catch {
-    return [];
+  } catch {}
+  let rows = [];
+
+  if (html && html.length > 500) {
+    const $ = load(html);
+
+    // FlightStats présente un tableau/une grille. Sélecteurs tolérants :
+    $('table tbody tr, .table tbody tr, .table__TableRow-sc-*').each((i, el) => {
+      const tds = $(el).find('td, .table__TableCell-sc-*');
+      const cols = tds.map((_, c) => $(c).text().trim()).get();
+      const time   = cols[0];
+      const flight = cols[1];
+      const city   = cols[2];
+      const status = cols[3] || cols[4] || '';
+
+      if (time && flight && city) rows.push(row(time, flight, city, status));
+    });
   }
+
+  if (rows.length) return rows;
+
+  // --- Fallback : Airportia
+  html = '';
+  try {
+    const r = await fetch(airportia, { headers: UA });
+    html = await r.text();
+  } catch { return []; }
 
   if (!html || html.length < 500) return [];
 
-  const $ = load(html);
-  const rows = [];
-
-  $('table tbody tr').each((i, el) => {
-    const td = $(el).find('td');
-    const time   = td.eq(0).text().trim();
-    const flight = td.eq(1).text().trim();
-    const city   = td.eq(2).text().trim();
-    const status = td.eq(3).text().trim();
-
-    if (time && flight && city) {
-      rows.push(row(time, flight, city, status));
-    }
-  });
+  {
+    const $ = load(html);
+    $('table tbody tr, .table tbody tr').each((i, el) => {
+      const tds = $(el).find('td');
+      const time   = tds.eq(0).text().trim();
+      const flight = tds.eq(1).text().trim();
+      const city   = tds.eq(2).text().trim();
+      const status = tds.eq(3).text().trim();
+      if (time && flight && city) rows.push(row(time, flight, city, status));
+    });
+  }
 
   return rows;
 }
+``
 
 /** LGG (site officiel) + fallback si nécessaire */
 async function fetchLGG(type = 'departures') {

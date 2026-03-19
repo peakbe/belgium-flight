@@ -1,185 +1,157 @@
 import express from 'express';
 import fetch from 'node-fetch';
+import cheerio from 'cheerio';
 import cors from 'cors';
 import dotenv from 'dotenv';
+import { HubConnectionBuilder, LogLevel } from '@microsoft/signalr';
 
 dotenv.config();
+
 const app = express();
 app.use(cors());
 
 const PORT = process.env.PORT || 8787;
-const AIRLABS_KEY = process.env.AIRLABS_API_KEY || "";
 
-/* ============================================================
-   Helpers
-============================================================ */
+/* ======================================================
+   1) STOCKAGE EN MEMOIRE LGG (temps réel via SignalR)
+====================================================== */
 
-function normalizeStatus(text) {
-  const t = (text || '').toLowerCase();
+let LGG_DEPARTURES = [];
+let LGG_ARRIVALS = [];
 
-  if (t.includes('landed'))     return { status: 'Atterri',    statusClass: 'ontime' };
-  if (t.includes('departed'))   return { status: 'Parti',      statusClass: 'boarding' };
-  if (t.includes('cancel'))     return { status: 'Annulé',     statusClass: 'delayed' };
-  if (t.includes('delay'))      return { status: 'Retardé',    statusClass: 'delayed' };
-  if (t.includes('scheduled'))  return { status: 'Prévu',      statusClass: '' };
-  if (t.includes('en-route'))   return { status: 'En vol',     statusClass: 'ontime' };
+/* ======================================================
+   2) CONNEXION AU FIDS LGG — SignalR WebSocket
+====================================================== */
 
-  return { status: text || '—', statusClass: '' };
-}
+async function startLGGSignalR() {
+  console.log("Connecting to LGG FIDS SignalR…");
 
-function toRow(obj, mode) {
-  const time = obj.dep_time || obj.arr_time || "—";
-  const flight = obj.flight_iata || obj.flight_icao || obj.flight_number || "—";
+  const connection = new HubConnectionBuilder()
+    .withUrl("https://fids.liegeairport.com/fidsHub")
+    .configureLogging(LogLevel.Error)
+    .withAutomaticReconnect()
+    .build();
 
-  let city = "—";
-  if (mode === "dep") {
-    city = obj.arr_city || obj.arr_iata || obj.arr_icao || "—";
-  } else {
-    city = obj.dep_city || obj.dep_iata || obj.dep_icao || "—";
-  }
+  // Messages "Departures"
+  connection.on("Departures", (data) => {
+    LGG_DEPARTURES = data.map(d => ({
+      time: d.std || d.sta || "—",
+      flight: d.flight || "—",
+      city: d.city || "—",
+      status: d.status || "—",
+      statusClass: statusToClass(d.status || "")
+    }));
+    console.log("LGG departures updated.");
+  });
 
-  const rawStatus = obj.status || obj.cs || "";
-  const st = normalizeStatus(rawStatus);
+  // Messages "Arrivals"
+  connection.on("Arrivals", (data) => {
+    LGG_ARRIVALS = data.map(d => ({
+      time: d.sta || d.std || "—",
+      flight: d.flight || "—",
+      city: d.city || "—",
+      status: d.status || "—",
+      statusClass: statusToClass(d.status || "")
+    }));
+    console.log("LGG arrivals updated.");
+  });
 
-  return {
-    time,
-    flight,
-    city,
-    status: st.status,
-    statusClass: st.statusClass
-  };
-}
-
-/* ============================================================
-   AirLabs Fetch
-   Réf : https://airlabs.co/api (timetable + flights) [1](https://airlabs.co/brussels-south-charleroi-airport-api)
-============================================================ */
-
-async function fetchAirLabs(endpoint, params) {
-  if (!AIRLABS_KEY) return [];
-
-  const qs = new URLSearchParams({ api_key: AIRLABS_KEY, ...params });
-  const url = `https://airlabs.co/api/v9/${endpoint}?${qs.toString()}`;
+  connection.onclose(() => console.log("LGG FIDS connection closed."));
+  connection.onreconnecting(() => console.log("Reconnecting LGG FIDS…"));
 
   try {
-    const r = await fetch(url);
-    const j = await r.json();
+    await connection.start();
+    console.log("LGG SignalR connected.");
+  } catch (e) {
+    console.log("LGG SignalR error:", e);
+  }
+}
 
-    if (!j || !j.response || !Array.isArray(j.response)) return [];
-    return j.response;
-  } catch {
+/* Utility: status -> CSS class */
+function statusToClass(t) {
+  const s = t.toLowerCase();
+  if (s.includes("delay") || s.includes("retard")) return "delayed";
+  if (s.includes("boarding")) return "boarding";
+  if (s.includes("on time") || s.includes("à l'heure")) return "ontime";
+  return "";
+}
+
+/* ======================================================
+   3) CRL — Scraper SSR (AirportInfo.live)
+====================================================== */
+
+async function scrapeCRL(type) {
+  const url =
+    type === "dep"
+      ? "https://airportinfo.live/fr/departs/crl/aeroport-charleroi"
+      : "https://airportinfo.live/fr/arrivees/crl/aeroport-charleroi";
+
+  try {
+    const r = await fetch(url, { headers: { "user-agent": "Mozilla/5.0" } });
+    const html = await r.text();
+    const $ = cheerio.load(html);
+
+    const rows = [];
+
+    $("table tbody tr").each((i, el) => {
+      const td = $(el).find("td");
+      if (td.length < 4) return;
+
+      const time = td.eq(0).text().trim();
+      const flight = td.eq(1).text().trim();
+      const city = td.eq(2).text().trim();
+      const status = td.eq(3).text().trim();
+
+      rows.push({
+        time,
+        flight,
+        city,
+        status,
+        statusClass: statusToClass(status)
+      });
+    });
+
+    return rows;
+  } catch (e) {
+    console.log("CRL scrape failed:", e);
     return [];
   }
 }
 
-/* ============================================================
-   CRL — timetable (passagers)
-============================================================ */
+/* ======================================================
+   4) API ROUTES
+====================================================== */
 
-async function getCRLDepartures() {
-  const data = await fetchAirLabs("timetable", {
-    dep_iata: "CRL",
-    type: "departure",
-    _view: "basic"
-  });
-  return data.map(x => toRow(x, "dep"));
-}
+// LGG (via WebSocket)
+app.get("/api/lgg/departures", (_req, res) => {
+  res.json(LGG_DEPARTURES);
+});
 
-async function getCRLArrivals() {
-  const data = await fetchAirLabs("timetable", {
-    arr_iata: "CRL",
-    type: "arrival",
-    _view: "basic"
-  });
-  return data.map(x => toRow(x, "arr"));
-}
+app.get("/api/lgg/arrivals", (_req, res) => {
+  res.json(LGG_ARRIVALS);
+});
 
-/* ============================================================
-   LGG — cargo => timetable + flights
-============================================================ */
-
-async function getLGGDepartures() {
-  const sched = await fetchAirLabs("timetable", {
-    dep_iata: "LGG",
-    type: "departure",
-    _view: "basic"
-  });
-
-  const live = await fetchAirLabs("flights", {
-    dep_icao: "EBLG",
-    _view: "basic"
-  });
-
-  const combined = [...sched, ...live];
-  const mapped = combined.map(x => toRow(x, "dep"));
-
-  const dedupe = new Map();
-  mapped.forEach(r => {
-    const key = r.flight + "_" + r.time;
-    dedupe.set(key, r);
-  });
-
-  return [...dedupe.values()];
-}
-
-async function getLGGArrivals() {
-  const sched = await fetchAirLabs("timetable", {
-    arr_iata: "LGG",
-    type: "arrival",
-    _view: "basic"
-  });
-
-  const live = await fetchAirLabs("flights", {
-    arr_icao: "EBLG",
-    _view: "basic"
-  });
-
-  const combined = [...sched, ...live];
-  const mapped = combined.map(x => toRow(x, "arr"));
-
-  const dedupe = new Map();
-  mapped.forEach(r => {
-    const key = r.flight + "_" + r.time;
-    dedupe.set(key, r);
-  });
-
-  return [...dedupe.values()];
-}
-
-/* ============================================================
-   Routes API
-============================================================ */
-
+// CRL (via SSR scraping)
 app.get("/api/crl/departures", async (_req, res) => {
-  res.json(await getCRLDepartures());
+  res.json(await scrapeCRL("dep"));
 });
 
 app.get("/api/crl/arrivals", async (_req, res) => {
-  res.json(await getCRLArrivals());
+  res.json(await scrapeCRL("arr"));
 });
 
-app.get("/api/lgg/departures", async (_req, res) => {
-  res.json(await getLGGDepartures());
-});
+/* ======================================================
+   5) HEALTH & ROOT
+====================================================== */
 
-app.get("/api/lgg/arrivals", async (_req, res) => {
-  res.json(await getLGGArrivals());
-});
+app.get("/healthz", (_req, res) => res.send("ok"));
+app.get("/", (_req, res) => res.send("Belgium Flight Proxy — OK. Try /api/..."));
 
-/* ============================================================
-   Health + Root
-============================================================ */
-
-app.get("/healthz", (_req, res) => res.status(200).send("ok"));
-app.get("/", (_req, res) => {
-  res.type("text/plain").send("Belgium Flight Proxy — OK. Try /healthz or /api/... ");
-});
-
-/* ============================================================
-   Start
-============================================================ */
+/* ======================================================
+   START SERVER
+====================================================== */
 
 app.listen(PORT, () => {
-  console.log("Flight proxy listening on port " + PORT);
+  console.log("Server running on port", PORT);
+  startLGGSignalR(); // démarrage du flux FIDS LGG
 });
-``

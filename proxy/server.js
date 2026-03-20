@@ -1,4 +1,19 @@
-// =============================
+// =============================, next) => {
+  console.error('🔥 Server error:', err);
+  const status = err.status || 500;
+  res.status(status).json({
+    error: true,
+    message: err.message || 'Internal Server Error',
+  });
+});
+
+// Lancer serveur sur le port imposé par Render
+const PORT = process.env.PORT || 3000;
+
+app.listen(PORT, () => {
+  console.log(`🚀 Server running on port ${PORT}`);
+});
+``
 //  server.js – ESM / Render Ready
 // =============================
 
@@ -8,8 +23,6 @@ import cors from 'cors';
 import helmet from 'helmet';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import flightsRoutes from './routes/flights.js';
-app.use('/api/flights', flightsRoutes);
 
 // Reconstituer __dirname en ESM
 const __filename = fileURLToPath(import.meta.url);
@@ -41,16 +54,6 @@ app.get('/api/health', (req, res) => {
   });
 });
 
-// Exemple d’async route avec try/catch correct
-app.get('/api/example', async (req, res, next) => {
-  try {
-    // ... ton code ici
-    res.json({ data: 'example' });
-  } catch (err) {
-    next(err);
-  }
-});
-
 // =============================
 //  Flights route
 // =============================
@@ -80,25 +83,10 @@ app.get('/api/flights', async (req, res, next) => {
     next(err);
   }
 });
-// 404 pour API
+
+// 404 pour API (doit être APRES les routes)
 app.use('/api', (req, res) => {
   res.status(404).json({ error: true, message: 'Not Found' });
 });
 
 // Global error handler
-// (⚠️ ne met PAS de "try" au niveau global ; Node gère le top-level async)
-app.use((err, req, res, next) => {
-  console.error('🔥 Server error:', err);
-  const status = err.status || 500;
-  res.status(status).json({
-    error: true,
-    message: err.message || 'Internal Server Error',
-  });
-});
-
-// Lancer serveur sur le port imposé par Render
-const PORT = process.env.PORT || 3000;
-
-app.listen(PORT, () => {
-  console.log(`🚀 Server running on port ${PORT}`);
-});

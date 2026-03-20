@@ -8,6 +8,8 @@ import cors from 'cors';
 import helmet from 'helmet';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import flightsRoutes from './routes/flights.js';
+app.use('/api/flights', flightsRoutes);
 
 // Reconstituer __dirname en ESM
 const __filename = fileURLToPath(import.meta.url);

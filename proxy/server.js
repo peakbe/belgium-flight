@@ -45,7 +45,7 @@ async function scrapeLGGWithBrowser(page) {
       // extraire Départs / Arrivées en privilégiant les titres s'ils existent
       const data = await page.evaluate(() => {
   // --- helpers dans le contexte navigateur ---
-  const TIME_HEADERS = [/^std$/i, /^sta$/i, /heure|time/i, /sched/i];
+  const TIME_HEADERS = [/^std$/i, /^sta$/i, /heure|time/i, /sched|etd|eta/i];
   const FLIGHT_HEADERS = [/^flight$/i, /^vol$/i, /flight ?no/i, /n[°o]\.?/i];
   const DEST_HEADERS = [/^dest/i, /^to$/i, /ville|city/i, /destination/i];
   const ORIG_HEADERS = [/^from$/i, /orig/i, /provenance/i];
@@ -61,6 +61,108 @@ async function scrapeLGGWithBrowser(page) {
     }
     return -1;
   };
+
+  function extractFromTable(tbl) {
+    const ths = Array.from(tbl.querySelectorAll('thead th')).map(th => th.innerText.trim());
+    const trs = Array.from(tbl.querySelectorAll('tbody tr'));
+
+    // détecter indexes d'après les <th>
+    const idx = { time:-1, flight:-1, city:-1, status:-1 };
+
+    if (ths.length) {
+      idx.time   = pickIndex(ths, TIME_HEADERS);
+      idx.flight = pickIndex(ths, FLIGHT_HEADERS);
+      // On ne sait pas encore si le tableau est Arrivées ou Départs => on l’inférera
+      const idxDest = pickIndex(ths, DEST_HEADERS);
+      const idxOrig = pickIndex(ths, ORIG_HEADERS);
+      idx.city   = (idxDest >= 0 ? idxDest : (idxOrig >= 0 ? idxOrig : -1));
+      idx.status = pickIndex(ths, STATUS_HEADERS);
+    }
+
+    const rows = [];
+    trs.forEach(tr => {
+      const tds = Array.from(tr.querySelectorAll('td')).map(td => td.innerText.trim());
+      if (!tds.length) return;
+
+      // Si pas d'en-tête exploitable, heuristique par motif
+      let t = (idx.time>=0 ? tds[idx.time] : '');
+      let f = (idx.flight>=0 ? tds[idx.flight] : '');
+      let c = (idx.city>=0 ? tds[idx.city] : '');
+      let s = (idx.status>=0 ? tds[idx.status] : '');
+
+      // Heuristiques si colonnes non trouvées ou incohérentes
+      const sample = tds.slice(0, Math.min(6, tds.length));
+      if (!isFlightLike(f)) {
+        const foundF = sample.find(x => isFlightLike(x));
+        if (foundF) f = foundF;
+      }
+      if (!isTimeLike(t)) {
+        const foundT = sample.find(x => isTimeLike(x));
+        if (foundT) t = foundT;
+      }
+      if (!c || isFlightLike(c) || isDateLike(c)) {
+        const foundC = sample.find(x => x && !isFlightLike(x) && !isDateLike(x) && !isTimeLike(x));
+        if (foundC) c = foundC;
+      }
+      if (!s) {
+        const cand = sample.find(x => /landed|atterri|on block|embarquement|boarding|delay|retard/i.test(x));
+        if (cand) s = cand;
+      }
+
+      // Filtrage : ignorer les lignes qui sont des séparateurs de date
+      if (isDateLike(t) && !isTimeLike(t)) t = '';
+      if (!isFlightLike(f)) return; // ex: ligne "19/03/2026" seule
+
+      rows.push({ time: t || '—', flight: f || '—', city: c || '—', status: s || '' });
+    });
+
+    return rows;
+  }
+
+  // Classification Départs/Arrivées par titre et/ou contenu
+  const result = { dep: [], arr: [] };
+  const headings = Array.from(document.querySelectorAll('h1,h2,h3,h4'));
+
+  let usedByHeading = false;
+  headings.forEach(h => {
+    const t = (h.innerText||'').toLowerCase();
+    const table = h.nextElementSibling && h.nextElementSibling.matches('table')
+      ? h.nextElementSibling
+      : (h.parentElement && h.parentElement.querySelector('table'));
+    if (!table) return;
+    const rows = extractFromTable(table);
+    if (!rows.length) return;
+    if (t.includes('depart')) result.dep = rows;
+    if (t.includes('arriv'))  result.arr = rows;
+    usedByHeading = true;
+  });
+  if (usedByHeading && (result.dep.length || result.arr.length)) return result;
+
+  // Fallback : balayer toutes les tables et inférer
+  const tables = Array.from(document.querySelectorAll('table'));
+  const classified = [];
+  tables.forEach(tbl => {
+    const rows = extractFromTable(tbl);
+    if (!rows.length) return;
+    const statuses = rows.map(r => r.status.toLowerCase()).join(' ');
+    const arrLike = /landed|atterri|on block/i.test(statuses);
+    classified.push({ type: arrLike ? 'arr' : 'dep', rows });
+  });
+
+  // Choisir un bloc dep et un bloc arr si dispo
+  const firstDep = classified.find(x => x.type==='dep');
+  const firstArr = classified.find(x => x.type==='arr');
+  if (firstDep) result.dep = firstDep.rows;
+  if (firstArr) result.arr = firstArr.rows;
+
+  // Dernier filet : si un seul type trouvé, utiliser le suivant comme l'autre
+  if ((!result.dep.length || !result.arr.length) && classified.length >= 2) {
+    if (!result.dep.length) result.dep = classified[0].rows;
+    if (!result.arr.length) result.arr = classified[1].rows;
+  }
+  return result;
+});
+
 
   function extractFromTable(tbl) {
     const ths = Array.from(tbl.querySelectorAll('thead th')).map(th => th.innerText.trim());

@@ -51,6 +51,35 @@ app.get('/api/example', async (req, res, next) => {
   }
 });
 
+// =============================
+//  Flights route
+// =============================
+app.get('/api/flights', async (req, res, next) => {
+  try {
+    const flights = [
+      {
+        id: 1,
+        from: 'BRU',
+        to: 'LGG',
+        departure: '2026-03-20T14:00:00Z',
+        arrival: '2026-03-20T14:25:00Z',
+        status: 'scheduled'
+      },
+      {
+        id: 2,
+        from: 'LGG',
+        to: 'CDG',
+        departure: '2026-03-20T15:40:00Z',
+        arrival: '2026-03-20T16:30:00Z',
+        status: 'boarding'
+      }
+    ];
+
+    res.json({ flights });
+  } catch (err) {
+    next(err);
+  }
+});
 // 404 pour API
 app.use('/api', (req, res) => {
   res.status(404).json({ error: true, message: 'Not Found' });

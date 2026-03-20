@@ -108,10 +108,13 @@ async function scrapeLGGWithBrowser(page) {
 }
 
 async function startLGGJob() {
-  const browser = await puppeteer.launch({
-    headless: 'new',
-    args: ['--no-sandbox', '--disable-setuid-sandbox']
-  });
+  
+const browser = await puppeteer.launch({
+  headless: 'new',
+  executablePath: puppeteer.executablePath(),  // <— utilise le Chrome téléchargé
+  args: ['--no-sandbox', '--disable-setuid-sandbox']
+});
+
   const page = await browser.newPage();
   await page.setUserAgent('Mozilla/5.0 (BelgiumFlightDashboard)');
 
